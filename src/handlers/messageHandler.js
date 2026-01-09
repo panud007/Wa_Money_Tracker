@@ -1,9 +1,11 @@
 import {
-    getOrCreateUser,
     createTransaction,
     getTransactions,
     getSummary,
+    deleteTransaction,
+    getLastTransaction,
 } from '../services/supabase.js';
+import { generateExcelReport } from '../services/excel.js';
 import { parseTransaction, parseCommand, parseDateRange } from '../utils/parser.js';
 import {
     formatTransactionConfirmation,
@@ -92,6 +94,21 @@ async function handleCommand(sock, from, user, command) {
             await handleTransactionsCommand(sock, from, user, params);
             break;
 
+        case 'undo':
+            await handleUndoCommand(sock, from, user);
+            break;
+
+        case 'hapus':
+        case 'delete':
+        case 'rm':
+            await handleDeleteCommand(sock, from, user, params);
+            break;
+
+        case 'export':
+        case 'excel':
+            await handleExportCommand(sock, from, user);
+            break;
+
         case 'kategori':
         case 'categories':
             await sock.sendMessage(from, {
@@ -117,8 +134,143 @@ async function handleCommand(sock, from, user, command) {
 
         default:
             await sock.sendMessage(from, {
-                text: formatErrorMessage(`Perintah "${cmd}" tidak dikenali. Ketik /help untuk bantuan.`),
+                text: formatErrorMessage(`Perintah "${cmd}" tidak dikenali.Ketik / help untuk bantuan.`),
             });
+    }
+}
+
+/**
+ * Handle undo command (delete last transaction)
+ */
+async function handleUndoCommand(sock, from, user) {
+    try {
+        // Get last transaction
+        const { data: lastTx, error: fetchError } = await getLastTransaction(user.id);
+
+        if (fetchError || !lastTx) {
+            await sock.sendMessage(from, {
+                text: '❌ Tidak ada transaksi untuk dibatalkan.',
+            });
+            return;
+        }
+
+        // Delete it
+        const { error: deleteError } = await deleteTransaction(lastTx.id, user.id);
+
+        if (deleteError) {
+            await sock.sendMessage(from, {
+                text: formatErrorMessage('Gagal membatalkan transaksi.'),
+            });
+            return;
+        }
+
+        await sock.sendMessage(from, {
+            text: `✅ * Transaksi Dibatalkan *\n\nNominal: ${lastTx.amount} \nKategori: ${lastTx.category} \n\nSaldo telah diperbarui.`,
+        });
+
+    } catch (error) {
+        console.error('Error undoing transaction:', error);
+        await sock.sendMessage(from, {
+            text: formatErrorMessage('Terjadi kesalahan saat membatalkan transaksi.'),
+        });
+    }
+}
+
+/**
+ * Handle delete command (delete by ID)
+ */
+async function handleDeleteCommand(sock, from, user, params) {
+    try {
+        const shortId = params[0];
+
+        if (!shortId) {
+            await sock.sendMessage(from, {
+                text: '❌ Harap sertakan ID transaksi.\nContoh: `/ hapus 3a1b`\n(Lihat ID di ` / transaksi`)',
+            });
+            return;
+        }
+
+        // We need to find the full ID based on short ID
+        // Strategy: Fetch last 50 transactions and find matching ID
+        const { data: transactions, error: fetchError } = await getTransactions(user.id, { limit: 50 });
+
+        if (fetchError || !transactions) {
+            await sock.sendMessage(from, {
+                text: formatErrorMessage('Gagal mencari transaksi.'),
+            });
+            return;
+        }
+
+        const targetTx = transactions.find(tx => tx.id.startsWith(shortId));
+
+        if (!targetTx) {
+            await sock.sendMessage(from, {
+                text: `❌ Transaksi dengan ID "${shortId}" tidak ditemukan(Cek 50 transaksi terakhir).`,
+            });
+            return;
+        }
+
+        // Delete it
+        const { error: deleteError } = await deleteTransaction(targetTx.id, user.id);
+
+        if (deleteError) {
+            await sock.sendMessage(from, {
+                text: formatErrorMessage('Gagal menghapus transaksi.'),
+            });
+            return;
+        }
+
+        await sock.sendMessage(from, {
+            text: `✅ * Transaksi Dihapus *\n\nID: ${shortId}...\nNominal: ${targetTx.amount} \nKategori: ${targetTx.category} `,
+        });
+
+    } catch (error) {
+        console.error('Error deleting transaction:', error);
+        await sock.sendMessage(from, {
+            text: formatErrorMessage('Terjadi kesalahan saat menghapus transaksi.'),
+        });
+    }
+}
+
+/**
+ * Handle export command (generate Excel)
+ */
+async function handleExportCommand(sock, from, user) {
+    try {
+        await sock.sendMessage(from, { text: '⏳ Sedang menyiapkan laporan Excel...' });
+
+        // Get transactions for current month
+        const today = new Date();
+        const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+        const { data: transactions, error } = await getTransactions(user.id, {
+            startDate: startOfMonth.toISOString().split('T')[0],
+            limit: 1000 // Reasonable limit for personal use
+        });
+
+        if (error || !transactions || transactions.length === 0) {
+            await sock.sendMessage(from, {
+                text: '❌ Tidak ada data transaksi untuk bulan ini.',
+            });
+            return;
+        }
+
+        // Generate Excel
+        const buffer = generateExcelReport(transactions);
+        const fileName = `Laporan_Keuangan_${today.toISOString().split('T')[0]}.xlsx`;
+
+        // Send document
+        await sock.sendMessage(from, {
+            document: buffer,
+            mimetype: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            fileName: fileName,
+            caption: `📊 Laporan Keuangan Bulan Ini\nTotal Transaksi: ${transactions.length}`
+        });
+
+    } catch (error) {
+        console.error('Error exporting data:', error);
+        await sock.sendMessage(from, {
+            text: formatErrorMessage('Gagal membuat file Excel.'),
+        });
     }
 }
 

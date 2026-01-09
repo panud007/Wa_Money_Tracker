@@ -84,8 +84,10 @@ export function formatTransactionList(transactions, limit = 10) {
     displayTransactions.forEach((transaction, index) => {
         const emoji = transaction.type === 'income' ? '💰' : '💸';
         const sign = transaction.type === 'income' ? '+' : '-';
+        // Get first 4 chars of ID for deletion reference
+        const shortId = transaction.id.split('-')[0].slice(0, 4);
 
-        message += `${index + 1}. ${emoji} ${sign}${formatCurrency(transaction.amount)}\n`;
+        message += `${index + 1}. ${emoji} ${sign}${formatCurrency(transaction.amount)} [Ref: ${shortId}]\n`;
         message += `   ${transaction.category}`;
 
         if (transaction.description) {
@@ -114,11 +116,12 @@ export function formatHelpMessage() {
     message += `• Terima bonus 2jt\n\n`;
 
     message += `*Perintah Bot:*\n`;
+    message += `/transaksi - Lihat daftar & Ref ID\n`;
     message += `/saldo - Lihat saldo bulan ini\n`;
     message += `/laporan - Laporan bulan ini\n`;
-    message += `/laporan hari ini - Laporan hari ini\n`;
-    message += `/laporan minggu ini - Laporan minggu ini\n`;
-    message += `/transaksi - Lihat 10 transaksi terakhir\n`;
+    message += `/hapus <ref> - Hapus transaksi (contoh: /hapus 3a1b)\n`;
+    message += `/undo - Batalkan transaksi terakhir\n`;
+    message += `/export - Download laporan Excel\n`;
     message += `/kategori - Lihat daftar kategori\n`;
     message += `/help - Tampilkan panduan ini\n\n`;
 
